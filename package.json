@@ -1,7 +1,11 @@
 {
   "dependencies": {
+    "apify-client": "^2.21.0",
     "axios": "^1.11.0",
+    "dotenv": "^17.2.3",
+    "feedsmith": "^2.9.0",
     "node-cron": "^4.2.1",
+    "node-schedule": "^2.1.1",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.32.0"
   }

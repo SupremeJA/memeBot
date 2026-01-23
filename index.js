@@ -1,142 +1,244 @@
-// index.js
-
-// === BLOCK 1: TOOLS & SETUP ===
-const { Client, MessageMedia } = require("whatsapp-web.js");
+require("dotenv").config();
+const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const axios = require("axios");
-const cron = require("node-cron"); // Our new scheduler tool!
+const { ApifyClient } = require("apify-client");
+const schedule = require("node-schedule");
 
+// === CONFIGURATION ===
+const APIFY_TOKEN = process.env.APIFY_TOKEN;
+const TARGET_GROUP_ID = process.env.TARGET_GROUP_ID;
+
+// The "Supplier" bucket
+let memeQueue = [];
+
+// Reliable Instagram Sources (Bangers only)
+const aggregatorHandles = [
+  "goatent_",
+  "boomtv_hd",
+  "igtweettv",
+  "tweetsavages",
+  "naijatwitter",
+];
+
+// Initialize Apify
+const apifyClient = new ApifyClient({ token: APIFY_TOKEN });
+
+// Initialize WhatsApp Client with Session Saving
 const client = new Client({
+  authStrategy: new LocalAuth(),
   puppeteer: {
-    args: ["--no-sandbox"], // This helps it run on servers
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   },
 });
 
-// === BLOCK 2: THE BOT'S MEMORY ===
-// We need a place to store the memes we send. A Map is perfect for this.
-// It will store a message ID and link it to the meme's URL.
-// Think of it like: { "message_123": "http://meme-url.com/meme.jpg" }
-const sentMemes = new Map();
+// === HELPER FUNCTION: THE SUPPLIER ===
+async function fetchMemesFromApify(manualDebug = false) {
+  const handle =
+    aggregatorHandles[Math.floor(Math.random() * aggregatorHandles.length)];
+  const targetUrl = `https://www.instagram.com/${handle}/`;
 
-// === BLOCK 3: CONFIGURATION ===
-// IMPORTANT: You need to get the ID of the group you want the bot in.
-// How to get it: Add the bot to the group. Send a message like "!groupid"
-// We'll add code to handle this command below.
-const TARGET_GROUP_ID = "1"; // e.g., "120363048915178893@g.us"
+  console.log(
+    `[Supplier] Connecting to Apify (Actor: shu8hvrXbJbY3Eb9W) to loot @${handle}...`,
+  );
 
-// === BLOCK 4: THE LOGIN PROCESS (Same as before) ===
+  try {
+    // EXACT SCHEMA from your snippet
+    const input = {
+      directUrls: [targetUrl],
+      resultsType: "posts",
+      resultsLimit: 3,
+      searchType: "user",
+      addParentData: false,
+    };
+
+    // Run the Official Actor
+    const run = await apifyClient.actor("shu8hvrXbJbY3Eb9W").call(input);
+
+    // Fetch results
+    const { items } = await apifyClient
+      .dataset(run.defaultDatasetId)
+      .listItems();
+
+    let newCount = 0;
+
+    items.forEach((post) => {
+      // The Official Actor usually puts the image in 'displayUrl' or 'url'
+      const imgUrl = post.displayUrl || post.url;
+      const caption = post.caption || "";
+
+      const isAd =
+        caption.toLowerCase().includes("bet9ja") ||
+        caption.toLowerCase().includes("promoted") ||
+        caption.toLowerCase().includes("live") ||
+        caption.toLowerCase().includes("download");
+
+      if (imgUrl && !isAd) {
+        const exists = memeQueue.some((m) => m.url === imgUrl);
+
+        if (!exists) {
+          memeQueue.push({
+            url: imgUrl,
+            caption: `📢 *Via @${handle}*\n\n${caption.substring(0, 200)}...`,
+          });
+          newCount++;
+        }
+      }
+    });
+
+    console.log(
+      `[Supplier] Success! Added ${newCount} new bangers. Queue size: ${memeQueue.length}`,
+    );
+
+    if (manualDebug)
+      return `✅ **Test Success!**\nFetched ${newCount} memes from @${handle}.\nCurrent Queue: ${memeQueue.length}`;
+    return true;
+  } catch (error) {
+    console.error("[Supplier Error]", error.message);
+    if (manualDebug) return `❌ **Test Failed**\nError: ${error.message}`;
+    return false;
+  }
+}
+
+// === SCHEDULER 1: RE-STOCK (Runs 5 times a day) ===
+// 8am, 12pm, 4pm, 8pm, 11pm
+// schedule.scheduleJob("0 8,12,16,20,23 * * *", () => fetchMemesFromApify());
+
+// // === SCHEDULER 2: DEALER (Runs every 30 mins) ===
+// schedule.scheduleJob("*/30 * * * *", async () => {
+//   // 1. Sleep Mode (1AM to 6AM - Don't send)
+//   const hour = new Date().getHours();
+//   if (hour >= 1 && hour < 6) return;
+
+//   // 2. Check Queue
+//   if (memeQueue.length === 0) {
+//     console.log("[Dealer] Queue empty. Triggering emergency restock...");
+//     await fetchMemesFromApify(); // Emergency fetch
+//   }
+
+//   if (memeQueue.length > 0) {
+//     const banger = memeQueue.shift();
+//     try {
+//       // OLD: const media = await MessageMedia.fromUrl(banger.url);
+//       // NEW:
+//       const media = await downloadMedia(banger.url);
+
+//       if (media) {
+//         await client.sendMessage(TARGET_GROUP_ID, media, {
+//           caption: banger.caption,
+//         });
+//         console.log("[Dealer] Banger sent successfully.");
+//       }
+//     } catch (e) {
+//       console.error("[Dealer] Failed to send media:", e.message);
+//     }
+//   }
+// });
+
+async function downloadMedia(url) {
+  try {
+    const response = await axios.get(url, {
+      responseType: "arraybuffer", // vital for images
+      timeout: 30000, // 30 seconds
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+
+    const mimetype = response.headers["content-type"] || "image/jpeg";
+    const data = Buffer.from(response.data).toString("base64");
+
+    return new MessageMedia(mimetype, data, "banger.jpg");
+  } catch (error) {
+    console.log(error);
+    console.error(`[Download Failed] ${error.message}`);
+    return null;
+  }
+}
+
+// === WHATSAPP EVENTS ===
+
 client.on("qr", (qr) => {
   qrcode.generate(qr, { small: true });
-  console.log("Scan this QR code with your phone in WhatsApp > Linked Devices");
+  console.log("Scan the QR code to log in!");
 });
 
 client.on("ready", () => {
-  console.log(
-    `Bot is ready! Current time in Abuja is ${new Date().toLocaleTimeString(
-      "en-NG",
-      { timeZone: "Africa/Lagos" }
-    )}`
-  );
-  console.log(`Will send memes to group ID: ${TARGET_GROUP_ID}`);
-  // Once the bot is ready, we start our scheduled task.
-  startMemeScheduler();
+  console.log("🤖 Bot is Online!");
+  console.log("Scheduler is active. Waiting for trigger times...");
+  message.reply("Bot is Online!");
 });
 
-// === BLOCK 5: THE MEME SCHEDULER ===
-function startMemeScheduler() {
-  // This cron schedule '0 */2 * * *' means "run at minute 0, every 2nd hour".
-  // So it will run at 2:00, 4:00, 6:00, etc.
-  cron.schedule(
-    "0 */2 * * *",
-    async () => {
-      console.log(
-        `It's time! Sending meme blast at ${new Date().toLocaleTimeString(
-          "en-NG",
-          { timeZone: "Africa/Lagos" }
-        )}`
-      );
-
-      // Let's clear the old memory before sending new memes
-      sentMemes.clear();
-      console.log("Cleared old meme memory.");
-
-      // Fetch and send 10 memes
-      for (let i = 0; i < 10; i++) {
-        try {
-          const response = await axios.get("https://meme-api.com/gimme/memes");
-          const memeUrl = response.data.url;
-
-          const media = await MessageMedia.fromUrl(memeUrl, {
-            unsafeMime: true,
-          });
-
-          // Send the message as VIEW ONCE and store its ID!
-          const sentMsg = await client.sendMessage(TARGET_GROUP_ID, media, {
-            isViewOnce: true,
-          });
-
-          // Now, we save it to our bot's memory
-          sentMemes.set(sentMsg.id._serialized, memeUrl);
-
-          // A small delay to avoid being flagged as spam
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-        } catch (error) {
-          console.error("Failed to send one of the memes in the blast:", error);
-        }
-      }
-      console.log("Meme blast complete. Bot is now listening for replies.");
-    },
-    {
-      scheduled: true,
-      timezone: "Africa/Lagos", // Important to set our timezone!
-    }
-  );
-}
-
-// === BLOCK 6: LISTENING FOR REPLIES & COMMANDS ===
 client.on("message_create", async (message) => {
-  const chat = await message.getChat();
-  const replyText = message.body.toLowerCase();
+  const body = message.body.toLowerCase();
 
-  // Helper command to get group ID
-  if (replyText === "!groupid" && chat.isGroup) {
-    message.reply(`This group's ID is: ${chat.id._serialized}`);
-    return;
-  }
-
-  // Now, let's check for replies to our memes
-  if (
-    message.hasQuotedMsg &&
-    (replyText === "send pls" || replyText === "send please")
-  ) {
-    const quotedMsg = await message.getQuotedMessage();
-
-    // Check if the replied-to message is one of the ones in our memory
-    if (sentMemes.has(quotedMsg.id._serialized)) {
-      console.log("Valid reply detected. Preparing to send the full meme.");
-
-      // Get the original meme URL from our memory
-      const memeUrl = sentMemes.get(quotedMsg.id._serialized);
-
-      try {
-        const media = await MessageMedia.fromUrl(memeUrl, { unsafeMime: true });
-
-        // Send it again, but this time as a normal image, not view-once
-        await client.sendMessage(message.from, media, {
-          caption: "Here you go! 😉",
+  // === COMMAND: MANUAL BANGER ===
+  if (body === "!banger") {
+    if (memeQueue.length > 0) {
+      const banger = memeQueue.shift();
+      const media = await downloadMedia(banger.url);
+      const chatDestination = message.fromMe ? message.to : message.from;
+      if (media) {
+        await client.sendMessage(chatDestination, media, {
+          caption: banger.caption,
+          isViewOnce: true,
         });
-
-        // Optional: remove it from memory so it can't be requested again
-        sentMemes.delete(quotedMsg.id._serialized);
-      } catch (error) {
-        console.error("Failed to re-send the meme:", error);
+      } else {
         message.reply(
-          "Ah, sorry. I couldn't seem to find that one. Try again."
+          "Omo, I found the meme but network refused to download it.",
         );
       }
+    } else {
+      return message.reply(
+        "Queue is empty. You can refill it by running !testapify",
+      );
+      // await fetchMemesFromApify();
+      // if (memeQueue.length > 0) {
+      //   const banger = memeQueue.shift();
+      //   const media = await MessageMedia.fromUrl(banger.displayUrl);
+      //   return client.sendMessage(message.from, media, {
+      //     caption: banger.caption,
+      //   });
+      // } else {
+      //   return message.reply("Apify is busy or credits low. Try again later.");
+      // }
     }
+  }
+
+  // === COMMAND: SYSTEM TEST ===
+  if (body === "!testapify") {
+    if (!message.fromMe) return; // Only allow YOU to run this
+    message.reply("🔄 Testing Apify connection... Hold on.");
+    const result = await fetchMemesFromApify(true);
+    return message.reply(result);
+  }
+
+  // === COMMAND: CHECK QUEUE ===
+  if (body === "!queue") {
+    // 1. Log the full details to your VS Code terminal (Safe)
+    console.log("CURRENT QUEUE:", JSON.stringify(memeQueue, null, 2));
+
+    // 2. Only send the summary to WhatsApp (Won't crash)
+    return client.sendMessage(
+      chatDestination,
+      `📦 **Stock Level:** ${memeQueue.length} memes currently in the chamber.`,
+    );
+  }
+
+  // === COMMAND: HELP ===
+  if (body === "!help") {
+    const text = [
+      "🤖 *BOT COMMANDS*",
+      "",
+      "*!banger* - Force send a meme now",
+      "*!queue* - Check meme stock",
+      "*!testapify* - Debug Apify connection (Owner only)",
+      "",
+      "_Auto-posting every 30 mins_",
+    ];
+    return message.reply(text.join("\n"));
   }
 });
 
-// === BLOCK 7: START THE BOT! ===
 client.initialize();

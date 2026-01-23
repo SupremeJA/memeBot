@@ -1,5 +1,7 @@
-# Dependencies
+
 /node_modules
 
 # WhatsApp-Web.js session files
 .wwebjs_auth/
+
+.env
