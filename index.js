@@ -42,12 +42,31 @@ const client = new Client({
     // 2. Add these args to prevent crashing on low-memory servers
     args: [
       "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--disable-gpu",
+         "--disable-setuid-sandbox",
+         "--disable-dev-shm-usage", // Crucial for Docker/Render
+         "--disable-accelerated-2d-canvas",
+         "--no-first-run",
+         "--no-zygote",
+         "--single-process", // ⚠️ Risky, but saves the MOST RAM
+         "--disable-gpu",
+         "--disable-extensions",
+         "--disable-component-extensions-with-background-pages",
+         "--disable-default-apps",
+         "--mute-audio",
+         "--no-default-browser-check",
+         "--disable-background-timer-throttling",
+         "--disable-backgrounding-occluded-windows",
+         "--disable-renderer-backgrounding",
+         "--disable-breakpad",
+         "--disable-client-side-phishing-detection",
+         "--disable-ipc-flooding-protection",
+         "--disable-hang-monitor",
+         "--disable-popup-blocking",
+         "--disable-print-preview",
+         "--disable-prompt-on-repost",
+         "--disable-sync",
+         "--metrics-recording-only",
+         "--safebrowsing-disable-auto-update
     ],
   },
 });
