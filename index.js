@@ -198,6 +198,11 @@ schedule.scheduleJob("0 8,12,17,21 * * *", async () => {
 
 client.on("qr", (qr) => {
   qrcode.generate(qr, { small: true });
+  console.log("\n👇 CAN'T SCAN? CLICK THIS LINK 👇");
+  console.log(
+    `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`,
+  );
+  console.log("👆👆👆\n");
   console.log("Scan the QR code to log in!");
 });
 
