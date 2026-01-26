@@ -204,7 +204,7 @@ async function connectToWhatsApp() {
     // === COMMAND: SET TARGET GROUP ===
     if (text === "!setgroup" && isMe) {
       TARGET_GROUP_ID = remoteJid;
-
+      console.log(remoteJid);
       // Save to .env logic (Simplified for brevity)
       try {
         let envContent = fs.existsSync(".env")
