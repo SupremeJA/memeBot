@@ -21,10 +21,7 @@ let TARGET_GROUP_ID = process.env.TARGET_GROUP_ID;
 
 // === DATA STRUCTURES ===
 let memeQueue = [
-  {
-    url: "https://images.apifyusercontent.com/Is5RkEFbJzG950GjgrEgHuq0ZhkboCykhzBjCP9lUXM/cb:1/aHR0cHM6Ly9zY29udGVudC1hdGwzLTIuY2RuaW5zdGFncmFtLmNvbS92L3Q1MS4yODg1LTE1LzIxNDgwMzcyXzM0ODk3OTI0ODg3Njg2Nl84NDQzNzIyNzk0MTYzNzY1MjQ4X24uanBnP3N0cD1kc3QtanBnX2UzNV90dDYmX25jX2h0PXNjb250ZW50LWF0bDMtMi5jZG5pbnN0YWdyYW0uY29tJl9uY19jYXQ9MTAyJl9uY19vYz1RNmNaMlFHNmRDbG9RTVk3YVFmMTVZUkZMcDY3NmxvaDM3aU04MzhPNkl2ejEybXRfSG56TzgyRmNJRDBnT3MyRVU1OV9WVSZfbmNfb2hjPTlLN3lwdGNnSHpJUTdrTnZ3RXRWQldlJl9uY19naWQ9WDY4SEpoTzBadFlmX0ktbG5mZENLdyZlZG09QVBzMTdDVUJBQUFBJmNjYj03LTUmb2g9MDBfQWZyNGhXVWVZUDI1NkJHTnJ1NkUxNFlLZkltRU44ZXU4R1Bnc1JFRG5yb2QtQSZvZT02OTdDNzY2QSZfbmNfc2lkPTEwZDEzYg.jpg",
-    caption: "hehe",
-  },
+  "https://images.apifyusercontent.com/Is5RkEFbJzG950GjgrEgHuq0ZhkboCykhzBjCP9lUXM/cb:1/aHR0cHM6Ly9zY29udGVudC1hdGwzLTIuY2RuaW5zdGFncmFtLmNvbS92L3Q1MS4yODg1LTE1LzIxNDgwMzcyXzM0ODk3OTI0ODg3Njg2Nl84NDQzNzIyNzk0MTYzNzY1MjQ4X24uanBnP3N0cD1kc3QtanBnX2UzNV90dDYmX25jX2h0PXNjb250ZW50LWF0bDMtMi5jZG5pbnN0YWdyYW0uY29tJl9uY19jYXQ9MTAyJl9uY19vYz1RNmNaMlFHNmRDbG9RTVk3YVFmMTVZUkZMcDY3NmxvaDM3aU04MzhPNkl2ejEybXRfSG56TzgyRmNJRDBnT3MyRVU1OV9WVSZfbmNfb2hjPTlLN3lwdGNnSHpJUTdrTnZ3RXRWQldlJl9uY19naWQ9WDY4SEpoTzBadFlmX0ktbG5mZENLdyZlZG09QVBzMTdDVUJBQUFBJmNjYj03LTUmb2g9MDBfQWZyNGhXVWVZUDI1NkJHTnJ1NkUxNFlLZkltRU44ZXU4R1Bnc1JFRG5yb2QtQSZvZT02OTdDNzY2QSZfbmNfc2lkPTEwZDEzYg.jpg",
 ];
 let sentHistory = []; // { id: "messageID", url: "url" }
 
@@ -47,9 +44,7 @@ const apifyClient = new ApifyClient({ token: APIFY_TOKEN });
 // === RENDER KEEP-ALIVE SERVER ===
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get("/", (req, res) =>
-  res.send("MemeBot (Baileys Edition) is Running! 🚀"),
-);
+app.get("/", (req, res) => res.send("MemeBot is Running! 🚀"));
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
 // === HELPER: DOWNLOAD MEDIA (Returns Buffer) ===
@@ -84,7 +79,7 @@ async function downloadImageBuffer(url) {
     } else {
       console.error(`[Reason] ${error.message}`);
     }
-    return null;
+    return error;
   }
 }
 
@@ -118,16 +113,12 @@ async function fetchMemesFromApify(manualDebug = false) {
         caption.toLowerCase().includes("promoted") ||
         caption.toLowerCase().includes("live") ||
         caption.toLowerCase().includes("download");
-
       const isVideo = post.isVideo || post.type === "Video" || post.isReel;
 
       if (imgUrl && !isAd && !isVideo) {
         const exists = memeQueue.some((m) => m.url === imgUrl);
         if (!exists) {
-          memeQueue.push({
-            url: imgUrl,
-            caption: caption.substring(0, 200),
-          });
+          memeQueue.push(imgUrl);
           newCount++;
         }
       }
@@ -242,7 +233,7 @@ async function connectToWhatsApp() {
     if (text === "!banger") {
       if (memeQueue.length > 0) {
         const banger = memeQueue.shift();
-        const buffer = await downloadImageBuffer(banger.url);
+        const buffer = await downloadImageBuffer(banger);
 
         if (buffer) {
           const sent = await sock.sendMessage(replyTo, {
@@ -253,7 +244,7 @@ async function connectToWhatsApp() {
 
           // Add to History
           if (sent) {
-            sentHistory.push({ id: sent.key.id, url: banger.url });
+            sentHistory.push({ id: sent.key.id, url: banger });
             if (sentHistory.length > 50) sentHistory.shift();
           }
         }
@@ -369,7 +360,7 @@ async function connectToWhatsApp() {
     for (let i = 0; i < 5; i++) {
       if (memeQueue.length === 0) break;
       const banger = memeQueue.shift();
-      const buffer = await downloadImageBuffer(banger.url);
+      const buffer = await downloadImageBuffer(banger);
 
       if (buffer) {
         const sent = await sock.sendMessage(TARGET_GROUP_ID, {
@@ -378,7 +369,7 @@ async function connectToWhatsApp() {
           viewOnce: true,
         });
         if (sent) {
-          sentHistory.push({ id: sent.key.id, url: banger.url });
+          sentHistory.push({ id: sent.key.id, url: banger });
           if (sentHistory.length > 50) sentHistory.shift();
         }
       }
