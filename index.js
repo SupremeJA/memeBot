@@ -94,7 +94,7 @@ async function fetchMemesFromApify(manualDebug = false) {
     const input = {
       directUrls: [targetUrl],
       resultsType: "posts",
-      resultsLimit: 1,
+      resultsLimit: 7,
       searchType: "user",
       addParentData: false,
     };
@@ -299,52 +299,52 @@ async function connectToWhatsApp() {
       }
 
       // 2. Try Downloading Quoted Media
-      try {
-        // We need to construct a fake message object for the download helper
-        // This part is tricky in Baileys, simplified here:
-        const quotedMessage =
-          msg.message.extendedTextMessage.contextInfo.quotedMessage;
-        // Basic check if it has an image
-        if (
-          quotedMessage.imageMessage ||
-          quotedMessage.viewOnceMessageV2?.message?.imageMessage
-        ) {
-          await sock.sendMessage(replyTo, {
-            react: { text: "👀", key: msg.key },
-          });
+      // try {
+      //   // We need to construct a fake message object for the download helper
+      //   // This part is tricky in Baileys, simplified here:
+      //   const quotedMessage =
+      //     msg.message.extendedTextMessage.contextInfo.quotedMessage;
+      //   // Basic check if it has an image
+      //   if (
+      //     quotedMessage.imageMessage ||
+      //     quotedMessage.viewOnceMessageV2?.message?.imageMessage
+      //   ) {
+      //     await sock.sendMessage(replyTo, {
+      //       react: { text: "👀", key: msg.key },
+      //     });
 
-          // Baileys 'downloadMediaMessage' needs the full message object structure
-          // It's often easier to rely on the cache method for view once
-          // But for normal images:
-          const buffer = await downloadMediaMessage(
-            {
-              key: { remoteJid: remoteJid, id: quotedId },
-              message: quotedMessage,
-            },
-            "buffer",
-            {},
-            { logger: pino({ level: "silent" }) },
-          );
+      //     // Baileys 'downloadMediaMessage' needs the full message object structure
+      //     // It's often easier to rely on the cache method for view once
+      //     // But for normal images:
+      //     const buffer = await downloadMediaMessage(
+      //       {
+      //         key: { remoteJid: remoteJid, id: quotedId },
+      //         message: quotedMessage,
+      //       },
+      //       "buffer",
+      //       {},
+      //       { logger: pino({ level: "silent" }) },
+      //     );
 
-          await sock.sendMessage(
-            replyTo,
-            { image: buffer, caption: "Stolen! 📦" },
-            { quoted: msg },
-          );
-          await sock.sendMessage(replyTo, {
-            react: { text: "✅", key: msg.key },
-          });
-        } else {
-          await sock.sendMessage(replyTo, {
-            text: "I can't see any image there.",
-          });
-        }
-      } catch (e) {
-        console.error("Pls Send Error:", e.message);
-        await sock.sendMessage(replyTo, {
-          text: "Could not download. It might be expired or I don't have the history.",
-        });
-      }
+      //     await sock.sendMessage(
+      //       replyTo,
+      //       { image: buffer, caption: "Stolen! 📦" },
+      //       { quoted: msg },
+      //     );
+      //     await sock.sendMessage(replyTo, {
+      //       react: { text: "✅", key: msg.key },
+      //     });
+      //   } else {
+      //     await sock.sendMessage(replyTo, {
+      //       text: "I can't see any image there.",
+      //     });
+      //   }
+      // } catch (e) {
+      //   console.error("Pls Send Error:", e.message);
+      //   await sock.sendMessage(replyTo, {
+      //     text: "Could not download. It might be expired or I don't have the history.",
+      //   });
+      // }
     }
   });
 
