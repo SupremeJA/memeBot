@@ -45,6 +45,7 @@ app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 // === HELPER: DOWNLOAD MEDIA (Returns Buffer) ===
 async function downloadImageBuffer(url) {
   try {
+    console.log(url);
     const response = await axios.get(url, {
       responseType: "arraybuffer",
       timeout: 30000,
@@ -55,6 +56,7 @@ async function downloadImageBuffer(url) {
     });
     return Buffer.from(response.data);
   } catch (error) {
+    console.log(error);
     console.error(`[Download Failed] ${error.message}`);
     return null;
   }
@@ -71,7 +73,7 @@ async function fetchMemesFromApify(manualDebug = false) {
     const input = {
       directUrls: [targetUrl],
       resultsType: "posts",
-      resultsLimit: 3,
+      resultsLimit: 1,
       searchType: "user",
       addParentData: false,
     };
