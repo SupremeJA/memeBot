@@ -1,26 +1,26 @@
 require("dotenv").config();
-const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
-const qrcode = require("qrcode-terminal");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  downloadMediaMessage,
+} = require("@whiskeysockets/baileys");
+const { Boom } = require("@hapi/boom");
+const pino = require("pino");
 const axios = require("axios");
 const { ApifyClient } = require("apify-client");
 const schedule = require("node-schedule");
 const fs = require("fs");
+const express = require("express"); // For Render Keep-Alive
+const qrcode = require("qrcode-terminal");
 
 // === CONFIGURATION ===
 const APIFY_TOKEN = process.env.APIFY_TOKEN;
 let TARGET_GROUP_ID = process.env.TARGET_GROUP_ID;
 
 // === DATA STRUCTURES ===
-// 1. QUEUE: Array for First-In-First-Out (Upcoming memes)
-let memeQueue = [
-  {
-    url: "https://images.apifyusercontent.com/jtfK0fIpo-rOTjljGgrEuecDxSV31owSEg_eIQ0le-4/cb:1/aHR0cHM6Ly9zY29udGVudC1sYXgzLTEuY2RuaW5zdGFncmFtLmNvbS92L3Q1MS4yODg1LTE1LzIxMzcxOTIyXzQ3MDQ0ODY1NjY3NTg5Nl80ODIzMzkxMjA1NjI0NjQzNTg0X24uanBnP3N0cD1kc3QtanBnX2UzNV90dDYmX25jX2h0PXNjb250ZW50LWxheDMtMS5jZG5pbnN0YWdyYW0uY29tJl9uY19jYXQ9MTA0Jl9uY19vYz1RNmNaMlFFTFZJSzQwOUJHWVVOZEJBUlJObHByY211YjluY3JGUlpwNGJCRVN2Yi1FTFpaSkFwQXRfZzBJdWh1WjBLM3B2cyZfbmNfb2hjPW15VDNiSDhuX2FvUTdrTnZ3RXNrMUpJJl9uY19naWQ9WVJGV3BzQ0d4SU9ISmJYSzlwSDRrUSZlZG09QVBzMTdDVUJBQUFBJmNjYj03LTUmb2g9MDBfQWZweWQzNFQ2U3l2OUpCTDJmRWFNUTk3Z0kxdzJRYlNjRUlaYVlidUFKQnVDdyZvZT02OTc5REVCRCZfbmNfc2lkPTEwZDEzYg.jpg",
-    caption: "😂😂 ",
-  },
-];
-
-// 2. HISTORY: Array to remember what we sent (For "pls send")
-let sentHistory = [];
+let memeQueue = [];
+let sentHistory = []; // { id: "messageID", url: "url" }
 
 // Reliable Instagram Sources
 const aggregatorHandles = [
@@ -34,45 +34,16 @@ const aggregatorHandles = [
 // Initialize Apify
 const apifyClient = new ApifyClient({ token: APIFY_TOKEN });
 
-// Initialize WhatsApp Client
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    // 2. Add these args to prevent crashing on low-memory servers
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage", // Crucial for Docker/Render
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--single-process", // ⚠️ Risky, but saves the MOST RAM
-      "--disable-gpu",
-      "--disable-extensions",
-      "--disable-component-extensions-with-background-pages",
-      "--disable-default-apps",
-      "--mute-audio",
-      "--no-default-browser-check",
-      "--disable-background-timer-throttling",
-      "--disable-backgrounding-occluded-windows",
-      "--disable-renderer-backgrounding",
-      "--disable-breakpad",
-      "--disable-client-side-phishing-detection",
-      "--disable-ipc-flooding-protection",
-      "--disable-hang-monitor",
-      "--disable-popup-blocking",
-      "--disable-print-preview",
-      "--disable-prompt-on-repost",
-      "--disable-sync",
-      "--metrics-recording-only",
-      "--safebrowsing-disable-auto-update",
-    ],
-  },
-});
+// === RENDER KEEP-ALIVE SERVER ===
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get("/", (req, res) =>
+  res.send("MemeBot (Baileys Edition) is Running! 🚀"),
+);
+app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
-// === HELPER: DOWNLOAD MEDIA ===
-async function downloadMedia(url) {
+// === HELPER: DOWNLOAD MEDIA (Returns Buffer) ===
+async function downloadImageBuffer(url) {
   try {
     const response = await axios.get(url, {
       responseType: "arraybuffer",
@@ -82,10 +53,7 @@ async function downloadMedia(url) {
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       },
     });
-
-    const mimetype = response.headers["content-type"] || "image/jpeg";
-    const data = Buffer.from(response.data).toString("base64");
-    return new MessageMedia(mimetype, data, "banger.jpg");
+    return Buffer.from(response.data);
   } catch (error) {
     console.error(`[Download Failed] ${error.message}`);
     return null;
@@ -97,7 +65,6 @@ async function fetchMemesFromApify(manualDebug = false) {
   const handle =
     aggregatorHandles[Math.floor(Math.random() * aggregatorHandles.length)];
   const targetUrl = `https://www.instagram.com/${handle}/`;
-
   console.log(`[Supplier] Looting @${handle}...`);
 
   try {
@@ -115,25 +82,19 @@ async function fetchMemesFromApify(manualDebug = false) {
       .listItems();
 
     let newCount = 0;
-
     items.forEach((post) => {
       const imgUrl = post.displayUrl || post.url;
       const caption = post.caption || "";
-
       const isAd =
         caption.toLowerCase().includes("bet9ja") ||
-        caption.toLowerCase().includes("promoted") ||
-        caption.toLowerCase().includes("live") ||
-        caption.toLowerCase().includes("download");
+        caption.toLowerCase().includes("promoted");
 
       if (imgUrl && !isAd) {
-        // Duplicate Check
         const exists = memeQueue.some((m) => m.url === imgUrl);
         if (!exists) {
-          // Push to QUEUE (Not History yet)
           memeQueue.push({
             url: imgUrl,
-            caption: caption.substring(0, 200), // Truncate long captions
+            caption: caption.substring(0, 200),
           });
           newCount++;
         }
@@ -153,219 +114,241 @@ async function fetchMemesFromApify(manualDebug = false) {
   }
 }
 
-// === SCHEDULER 1: RE-STOCK (Keep the Fridge Full) ===
-// Runs every 4 hours to fetch new memes from Instagram
-schedule.scheduleJob("0 */4 * * *", async () => {
-  console.log("[Scheduler] Triggering routine restock...");
-  await fetchMemesFromApify();
-});
+// === MAIN BOT FUNCTION ===
+async function connectToWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
 
-// === SCHEDULER 2: THE BATCH DEALER (Auto-Poster) ===
-// Runs at 8:00 AM, 12:00 PM, 5:00 PM, 9:00 PM
-schedule.scheduleJob("0 8,12,17,21 * * *", async () => {
-  console.log("⏰ [Dealer] It's posting time!");
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: false,
+    logger: pino({ level: "silent" }), // Hide excessive logs
+    browser: ["MemeBot", "Chrome", "1.0.0"],
+  });
 
-  if (!TARGET_GROUP_ID) {
-    console.log("⚠️ [Dealer] No Target Group ID set. Use !setgroup first.");
-    return;
-  }
+  sock.ev.on("creds.update", saveCreds);
 
-  // Emergency Restock if we don't have enough for a batch
-  if (memeQueue.length < 5) {
-    console.log("[Dealer] Not enough memes! Fetching more first...");
-    await fetchMemesFromApify();
-  }
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
-  // Send a batch of 5 (or however many we have)
-  const batchSize = 5;
-
-  for (let i = 0; i < batchSize; i++) {
-    if (memeQueue.length === 0) {
-      console.log("[Dealer] Queue ran out mid-batch.");
-      break;
+    if (qr) {
+      console.log("Scan the QR code below to log in:");
+      qrcode.generate(qr, { small: true });
     }
 
-    const banger = memeQueue.shift();
-    console.log(`[Dealer] Sending meme ${i + 1}/${batchSize}...`);
+    if (connection === "close") {
+      const shouldReconnect =
+        lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log(
+        "Connection closed due to ",
+        lastDisconnect.error,
+        ", reconnecting ",
+        shouldReconnect,
+      );
+      if (shouldReconnect) {
+        connectToWhatsApp();
+      }
+    } else if (connection === "open") {
+      console.log("🤖 Baileys Bot is Online!");
+    }
+  });
 
-    const media = await downloadMedia(banger.url);
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    const msg = messages[0];
+    if (!msg.message) return;
 
-    if (media) {
+    // Helper to get text body
+    const msgType = Object.keys(msg.message)[0];
+    const body =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text ||
+      msg.message.imageMessage?.caption ||
+      "";
+    const text = body.toLowerCase();
+
+    const remoteJid = msg.key.remoteJid;
+    const isMe = msg.key.fromMe;
+
+    // Determine reply destination
+    // In Baileys, we always send to 'remoteJid' unless we want to DM the sender of a group msg
+    const replyTo = remoteJid;
+
+    // === COMMAND: SET TARGET GROUP ===
+    if (text === "!setgroup" && isMe) {
+      TARGET_GROUP_ID = remoteJid;
+
+      // Save to .env logic (Simplified for brevity)
       try {
-        const sentMsg = await client.sendMessage(TARGET_GROUP_ID, media, {
-          caption: banger.caption,
-          isViewOnce: true, // Send as View Once (remove this line if you want them permanent)
-        });
-
-        // Add to History (so 'pls send' works)
-        sentHistory.push({ id: sentMsg.id._serialized, url: banger.url });
-        if (sentHistory.length > 50) sentHistory.shift();
-      } catch (err) {
-        console.error(`[Dealer] Failed to send meme: ${err.message}`);
-      }
-    }
-
-    // 🛑 IMPORTANT: Wait 10-20 seconds between memes to avoid spam bans
-    const delay = Math.floor(Math.random() * 10000) + 10000; // 10s to 20s
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-
-  console.log("✅ [Dealer] Batch complete.");
-});
-
-// === WHATSAPP EVENTS ===
-
-client.on("qr", (qr) => {
-  qrcode.generate(qr, { small: true });
-  console.log("\n👇 CAN'T SCAN? CLICK THIS LINK 👇");
-  console.log(
-    `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`,
-  );
-  console.log("👆👆👆\n");
-  console.log("Scan the QR code to log in!");
-});
-
-client.on("ready", () => {
-  console.log("🤖 Bot is Online!");
-});
-
-client.on("message_create", async (message) => {
-  const chat = await message.getChat();
-  const body = message.body.toLowerCase();
-
-  // Logic to determine where to send replies
-  const chatDestination = message.fromMe ? message.to : message.from;
-
-  function noPermission(text) {
-    message.reply(text || "You don't get to say that, broski 😑");
-    return;
-  }
-  // === COMMAND: SET TARGET GROUP ===
-  if (body === "!setgroup") {
-    if (!message.fromMe) {
-      noPermission();
-    }
-
-    const newGroupId = chat.id._serialized;
-    TARGET_GROUP_ID = newGroupId;
-
-    try {
-      const envPath = "./.env";
-      let envContent = "";
-
-      // Handle if file doesn't exist
-      if (fs.existsSync(envPath)) {
-        envContent = fs.readFileSync(envPath, "utf8");
-      }
-
-      const regex = /^TARGET_GROUP_ID=.*$/m;
-      if (regex.test(envContent)) {
-        envContent = envContent.replace(regex, `TARGET_GROUP_ID=${newGroupId}`);
-      } else {
-        envContent += `\nTARGET_GROUP_ID=${newGroupId}`;
-      }
-
-      fs.writeFileSync(envPath, envContent);
-      return message.reply(`✅ Target group updated: ${chat.name}`);
-    } catch (error) {
-      console.error(error);
-      return message.reply("❌ Error saving configuration.");
-    }
-  }
-
-  // === COMMAND: MANUAL BANGER ===
-  if (body === "!banger") {
-    if (memeQueue.length > 0) {
-      // 1. Get from QUEUE
-      const banger = memeQueue.shift();
-
-      const media = await downloadMedia(banger.url);
-      if (media) {
-        // 2. Send Message
-        const sentMsg = await client.sendMessage(chatDestination, media, {
-          caption: banger.caption,
-          isViewOnce: true,
-        });
-
-        // 3. Add to HISTORY (for pls send)
-        sentHistory.push({
-          id: sentMsg.id._serialized,
-          url: banger.url,
-        });
-
-        // Keep history clean (max 50 items)
-        if (sentHistory.length > 50) sentHistory.shift();
-      } else {
-        message.reply("Omo, network refused to download it.");
-      }
-    } else {
-      return message.reply("Queue is empty. Run !testapify");
-    }
-  }
-
-  // === COMMAND: SYSTEM TEST ===
-  if (body === "!testapify") {
-    if (!message.fromMe) noPermission();
-    message.reply("🔄 Testing Apify...");
-    const result = await fetchMemesFromApify(true);
-    return message.reply(result);
-  }
-
-  // === COMMAND: CHECK QUEUE ===
-  if (body === "!queue") {
-    console.log("CURRENT QUEUE:", JSON.stringify(memeQueue, null, 2));
-    return client.sendMessage(
-      chatDestination,
-      `📦 **Storage Level:** ${memeQueue.length} memes.`,
-    );
-  }
-
-  // === COMMAND: SEND PLS ===
-  // Triggers on "send pls", "send please", "pls send", "save", "steal"
-  if (
-    message.hasQuotedMsg &&
-    (body.includes("send") || body === "save" || body === "steal")
-  ) {
-    const quotedMsg = await message.getQuotedMessage();
-    const quotedMsgID = quotedMsg.id._serialized;
-
-    // 1. Check HISTORY
-    const historyItem = sentHistory.find((item) => item.id === quotedMsgID);
-
-    if (historyItem) {
-      console.log(`[Pls Send] Found in history! URL: ${historyItem.url}`);
-      await message.react("⚡"); // React Lightning (Cache Hit)
-
-      try {
-        const media = await downloadMedia(historyItem.url);
-        if (media) {
-          // Send as normal image (not view once)
-          await client.sendMessage(chatDestination, media, {
-            caption: "Here you go 😌",
-          });
-          await message.react("✅");
+        let envContent = fs.existsSync(".env")
+          ? fs.readFileSync(".env", "utf8")
+          : "";
+        const regex = /^TARGET_GROUP_ID=.*$/m;
+        if (regex.test(envContent)) {
+          envContent = envContent.replace(
+            regex,
+            `TARGET_GROUP_ID=${TARGET_GROUP_ID}`,
+          );
         } else {
-          await message.reply("Something went wrong 😟");
+          envContent += `\nTARGET_GROUP_ID=${TARGET_GROUP_ID}`;
         }
-      } catch (error) {
-        console.error(error);
-        await message.react("❌");
+        fs.writeFileSync(".env", envContent);
+        await sock.sendMessage(replyTo, {
+          text: `✅ Target Group Set: ${TARGET_GROUP_ID}`,
+        });
+      } catch (e) {
+        console.error(e);
       }
-    } else {
-      // 2. Fallback: Try to download directly (If not view once)
-      console.log("[Pls Send] Not in history, trying direct download...");
+      return;
+    }
+
+    // === COMMAND: MANUAL BANGER ===
+    if (text === "!banger") {
+      if (memeQueue.length > 0) {
+        const banger = memeQueue.shift();
+        const buffer = await downloadImageBuffer(banger.url);
+
+        if (buffer) {
+          const sent = await sock.sendMessage(replyTo, {
+            image: buffer,
+            caption: banger.caption,
+            viewOnce: true, // Baileys support for View Once
+          });
+
+          // Add to History
+          if (sent) {
+            sentHistory.push({ id: sent.key.id, url: banger.url });
+            if (sentHistory.length > 50) sentHistory.shift();
+          }
+        }
+      } else {
+        await sock.sendMessage(replyTo, { text: "Queue is empty." });
+      }
+      return;
+    }
+
+    // === COMMAND: TEST APIFY ===
+    if (text === "!testapify" && isMe) {
+      await sock.sendMessage(replyTo, { text: "🔄 Testing Apify..." });
+      const result = await fetchMemesFromApify(true);
+      await sock.sendMessage(replyTo, { text: result });
+      return;
+    }
+
+    // === COMMAND: CHECK QUEUE ===
+    if (text === "!queue") {
+      console.log(JSON.stringify(memeQueue, null, 2));
+      await sock.sendMessage(replyTo, {
+        text: `📦 Stock: ${memeQueue.length} memes.`,
+      });
+      return;
+    }
+
+    // === COMMAND: PLS SEND / SAVE / STEAL ===
+    const isReply = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+    if (
+      (text.includes("pls send") || text === "save" || text === "steal") &&
+      isReply
+    ) {
+      const quotedId = msg.message.extendedTextMessage.contextInfo.stanzaId;
+
+      // 1. Try History Cache First
+      const cached = sentHistory.find((i) => i.id === quotedId);
+      if (cached) {
+        console.log("[Pls Send] Cache hit!");
+        await sock.sendMessage(replyTo, {
+          react: { text: "⚡", key: msg.key },
+        });
+
+        const buffer = await downloadImageBuffer(cached.url);
+        if (buffer) {
+          await sock.sendMessage(
+            replyTo,
+            { image: buffer, caption: "Here you go 📦" },
+            { quoted: msg },
+          );
+          return;
+        }
+      }
+
+      // 2. Try Downloading Quoted Media
       try {
-        if (quotedMsg.hasMedia) {
-          const media = await quotedMsg.downloadMedia();
-          await message.reply(media);
+        // We need to construct a fake message object for the download helper
+        // This part is tricky in Baileys, simplified here:
+        const quotedMessage =
+          msg.message.extendedTextMessage.contextInfo.quotedMessage;
+        // Basic check if it has an image
+        if (
+          quotedMessage.imageMessage ||
+          quotedMessage.viewOnceMessageV2?.message?.imageMessage
+        ) {
+          await sock.sendMessage(replyTo, {
+            react: { text: "👀", key: msg.key },
+          });
+
+          // Baileys 'downloadMediaMessage' needs the full message object structure
+          // It's often easier to rely on the cache method for view once
+          // But for normal images:
+          const buffer = await downloadMediaMessage(
+            {
+              key: { remoteJid: remoteJid, id: quotedId },
+              message: quotedMessage,
+            },
+            "buffer",
+            {},
+            { logger: pino({ level: "silent" }) },
+          );
+
+          await sock.sendMessage(
+            replyTo,
+            { image: buffer, caption: "Stolen! 📦" },
+            { quoted: msg },
+          );
+          await sock.sendMessage(replyTo, {
+            react: { text: "✅", key: msg.key },
+          });
         } else {
-          message.reply("I don't have that one in memory anymore 🫠");
+          await sock.sendMessage(replyTo, {
+            text: "I can't see any image there.",
+          });
         }
       } catch (e) {
-        message.reply("Cannot download. It might be expired 🥲");
+        console.error("Pls Send Error:", e.message);
+        await sock.sendMessage(replyTo, {
+          text: "Could not download. It might be expired or I don't have the history.",
+        });
       }
     }
-  }
-});
+  });
 
-client.initialize();
+  // === SCHEDULER ===
+  // Runs every 4 hours to fetch
+  schedule.scheduleJob("0 */4 * * *", () => fetchMemesFromApify());
+
+  // Runs batches at 8am, 12pm, 5pm, 9pm
+  schedule.scheduleJob("0 8,12,17,21 * * *", async () => {
+    if (!TARGET_GROUP_ID) return console.log("No Target Group Set");
+    if (memeQueue.length < 5) await fetchMemesFromApify();
+
+    for (let i = 0; i < 5; i++) {
+      if (memeQueue.length === 0) break;
+      const banger = memeQueue.shift();
+      const buffer = await downloadImageBuffer(banger.url);
+
+      if (buffer) {
+        const sent = await sock.sendMessage(TARGET_GROUP_ID, {
+          image: buffer,
+          caption: banger.caption,
+          viewOnce: true,
+        });
+        if (sent) {
+          sentHistory.push({ id: sent.key.id, url: banger.url });
+          if (sentHistory.length > 50) sentHistory.shift();
+        }
+      }
+      // Delay 10-20s
+      await new Promise((r) => setTimeout(r, 10000 + Math.random() * 10000));
+    }
+  });
+}
+
+// Start the bot
+connectToWhatsApp();
