@@ -1,4 +1,5 @@
 require("dotenv").config();
+
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -19,7 +20,12 @@ const APIFY_TOKEN = process.env.APIFY_TOKEN;
 let TARGET_GROUP_ID = process.env.TARGET_GROUP_ID;
 
 // === DATA STRUCTURES ===
-let memeQueue = [];
+let memeQueue = [
+  {
+    url: "https://images.apifyusercontent.com/Is5RkEFbJzG950GjgrEgHuq0ZhkboCykhzBjCP9lUXM/cb:1/aHR0cHM6Ly9zY29udGVudC1hdGwzLTIuY2RuaW5zdGFncmFtLmNvbS92L3Q1MS4yODg1LTE1LzIxNDgwMzcyXzM0ODk3OTI0ODg3Njg2Nl84NDQzNzIyNzk0MTYzNzY1MjQ4X24uanBnP3N0cD1kc3QtanBnX2UzNV90dDYmX25jX2h0PXNjb250ZW50LWF0bDMtMi5jZG5pbnN0YWdyYW0uY29tJl9uY19jYXQ9MTAyJl9uY19vYz1RNmNaMlFHNmRDbG9RTVk3YVFmMTVZUkZMcDY3NmxvaDM3aU04MzhPNkl2ejEybXRfSG56TzgyRmNJRDBnT3MyRVU1OV9WVSZfbmNfb2hjPTlLN3lwdGNnSHpJUTdrTnZ3RXRWQldlJl9uY19naWQ9WDY4SEpoTzBadFlmX0ktbG5mZENLdyZlZG09QVBzMTdDVUJBQUFBJmNjYj03LTUmb2g9MDBfQWZyNGhXVWVZUDI1NkJHTnJ1NkUxNFlLZkltRU44ZXU4R1Bnc1JFRG5yb2QtQSZvZT02OTdDNzY2QSZfbmNfc2lkPTEwZDEzYg.jpg",
+    caption: "hehe",
+  },
+];
 let sentHistory = []; // { id: "messageID", url: "url" }
 
 // Reliable Instagram Sources
@@ -29,6 +35,10 @@ const aggregatorHandles = [
   "igtweettv",
   "tweetsavages",
   "naijatwitter",
+  "tiaentmedia",
+  "moonscholar__",
+  // "chuks_tv_media",
+  "memes_by_tola",
 ];
 
 // Initialize Apify
@@ -45,19 +55,35 @@ app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 // === HELPER: DOWNLOAD MEDIA (Returns Buffer) ===
 async function downloadImageBuffer(url) {
   try {
-    console.log(url);
     const response = await axios.get(url, {
       responseType: "arraybuffer",
       timeout: 30000,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        Referer: "https://www.instagram.com/",
+        "Sec-Fetch-Dest": "image",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "cross-site",
       },
     });
+
+    if (response.status !== 200) {
+      throw new Error(`Status Code ${response.status}`);
+    }
+
     return Buffer.from(response.data);
   } catch (error) {
-    console.log(error);
-    console.error(`[Download Failed] ${error.message}`);
+    console.error(`[Download Failed] URL: ${url}`);
+    if (error.response) {
+      console.error(
+        `[Reason] Server responded with status ${error.response.status}`,
+      );
+    } else {
+      console.error(`[Reason] ${error.message}`);
+    }
     return null;
   }
 }
@@ -89,9 +115,13 @@ async function fetchMemesFromApify(manualDebug = false) {
       const caption = post.caption || "";
       const isAd =
         caption.toLowerCase().includes("bet9ja") ||
-        caption.toLowerCase().includes("promoted");
+        caption.toLowerCase().includes("promoted") ||
+        caption.toLowerCase().includes("live") ||
+        caption.toLowerCase().includes("download");
 
-      if (imgUrl && !isAd) {
+      const isVideo = post.isVideo || post.type === "Video" || post.isReel;
+
+      if (imgUrl && !isAd && !isVideo) {
         const exists = memeQueue.some((m) => m.url === imgUrl);
         if (!exists) {
           memeQueue.push({
@@ -125,6 +155,12 @@ async function connectToWhatsApp() {
     printQRInTerminal: false,
     logger: pino({ level: "silent" }), // Hide excessive logs
     browser: ["MemeBot", "Chrome", "1.0.0"],
+    connectTimeoutMs: 60_000,
+    defaultQueryTimeoutMs: 60_000,
+    keepAliveIntervalMs: 10_000,
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    retryRequestDelayMs: 5000,
   });
 
   sock.ev.on("creds.update", saveCreds);
