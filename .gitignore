@@ -3,5 +3,5 @@
 
 # WhatsApp-Web.js session files
 .wwebjs_auth/
-auth_info_baileys/
+
 .env
