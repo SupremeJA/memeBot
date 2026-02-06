@@ -79,7 +79,7 @@ async function downloadImageBuffer(url) {
     } else {
       console.error(`[Reason] ${error.message}`);
     }
-    return error;
+    return null;
   }
 }
 
@@ -238,7 +238,6 @@ async function connectToWhatsApp() {
         if (buffer) {
           const sent = await sock.sendMessage(replyTo, {
             image: buffer,
-            caption: banger.caption,
             viewOnce: true, // Baileys support for View Once
           });
 
