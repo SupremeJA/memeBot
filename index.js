@@ -261,9 +261,13 @@ async function connectToWhatsApp() {
         const buffer = await downloadImageBuffer(banger);
 
         if (buffer) {
+          // Add a small delay and another presence update for stability
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          await sock.sendPresenceUpdate("composing", replyTo);
+
           const sent = await sock.sendMessage(replyTo, {
             image: buffer,
-            viewOnce: true, // Baileys support for View Once
+            viewOnce: true,
           });
 
           // Add to History
