@@ -32,7 +32,6 @@ let memeQueue = [
 ];
 let sentHistory = []; // { id: "messageID", url: "url" }
 
-// Reliable Instagram Sources
 const aggregatorHandles = [
   "goatent_",
   "boomtv_hd",
@@ -41,11 +40,9 @@ const aggregatorHandles = [
   "naijatwitter",
   "tiaentmedia",
   "moonscholar__",
-  // "chuks_tv_media",
   "memes_by_tola",
 ];
 
-// Initialize Apify
 const apifyClient = new ApifyClient({ token: APIFY_TOKEN });
 
 // === RENDER KEEP-ALIVE SERVER ===
@@ -54,7 +51,6 @@ const PORT = process.env.PORT || 3000;
 app.get("/", (req, res) => res.send("MemeBot is Running! 🚀"));
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
-// === HELPER: DOWNLOAD MEDIA (Returns Buffer) ===
 async function downloadImageBuffer(url) {
   const tmpFile = path.join(os.tmpdir(), `img_${Date.now()}.jpg`);
 
@@ -89,7 +85,7 @@ async function downloadImageBuffer(url) {
     if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
   }
 }
-// === HELPER: THE SUPPLIER ===
+
 async function fetchMemesFromApify(manualDebug = false) {
   const handle =
     aggregatorHandles[Math.floor(Math.random() * aggregatorHandles.length)];
@@ -143,7 +139,6 @@ async function fetchMemesFromApify(manualDebug = false) {
   }
 }
 
-// === MAIN BOT FUNCTION ===
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
 
