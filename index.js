@@ -261,20 +261,43 @@ async function connectToWhatsApp() {
         const buffer = await downloadImageBuffer(banger);
 
         if (buffer) {
-          // Add a small delay and another presence update for stability
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-          await sock.sendPresenceUpdate("composing", replyTo);
+          const sendMessageWithRetry = async (retries = 1) => {
+            try {
+              // Add a small delay and another presence update for stability
+              await new Promise((resolve) => setTimeout(resolve, 3000));
+              await sock.sendPresenceUpdate("composing", replyTo);
 
-          const sent = await sock.sendMessage(replyTo, {
-            image: buffer,
-            viewOnce: true,
-          });
+              const sent = await sock.sendMessage(replyTo, {
+                image: buffer,
+                viewOnce: true,
+              });
 
-          // Add to History
-          if (sent) {
-            sentHistory.push({ id: sent.key.id, url: banger });
-            if (sentHistory.length > 50) sentHistory.shift();
-          }
+              // Add to History
+              if (sent) {
+                sentHistory.push({ id: sent.key.id, url: banger });
+                if (sentHistory.length > 50) sentHistory.shift();
+              }
+              return true; // Success
+            } catch (error) {
+              console.error(`[Send Error] Attempt failed: ${error.message}`);
+              if (
+                retries > 0 &&
+                (error.output?.statusCode === 408 ||
+                  error.output?.statusCode === 428 ||
+                  error.message.includes("Connection Closed"))
+              ) {
+                console.log(`Retrying... (${retries} attempts left)`);
+                // The main connection handler will attempt to reconnect.
+                // We just wait for it.
+                await new Promise((resolve) => setTimeout(resolve, 5000));
+                return sendMessageWithRetry(retries - 1);
+              }
+              console.error("[Send Error] Failed after all retries.");
+              return false; // Failure
+            }
+          };
+
+          await sendMessageWithRetry();
         }
       } else {
         await sock.sendMessage(replyTo, { text: "Queue is empty." });
