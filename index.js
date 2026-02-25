@@ -251,9 +251,13 @@ async function connectToWhatsApp() {
     }
 
     // === COMMAND: MANUAL BANGER ===
-    if (text === "!banger") {
+    if (text === "!b") {
       if (memeQueue.length > 0) {
         const banger = memeQueue.shift();
+
+        // Let them know we're working on it
+        await sock.sendPresenceUpdate("composing", replyTo);
+
         const buffer = await downloadImageBuffer(banger);
 
         if (buffer) {
@@ -286,7 +290,15 @@ async function connectToWhatsApp() {
     if (text === "!queue") {
       console.log(JSON.stringify(memeQueue, null, 2));
       await sock.sendMessage(replyTo, {
-        text: `📦 Stock: ${memeQueue.length} memes.`,
+        text: `📦 Stock: ${memeQueue.length}`,
+      });
+      return;
+    }
+
+    // === COMMAND: ALIVE CHECK ===
+    if (text === "!alive") {
+      await sock.sendMessage(replyTo, {
+        text: "Alive and running.",
       });
       return;
     }
