@@ -20,7 +20,8 @@ const { ApifyClient } = require("apify-client");
 const schedule = require("node-schedule");
 const fs = require("fs");
 const express = require("express"); // For Render Keep-Alive
-const qrcode = require("qrcode-terminal");
+const qrcode = require("qrcode");
+const { ImgurClient } = require("imgur");
 
 // === CONFIGURATION ===
 const APIFY_TOKEN = process.env.APIFY_TOKEN;
@@ -158,8 +159,30 @@ async function connectToWhatsApp() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log("Scan the QR code below to log in:");
-      qrcode.generate(qr, { small: true });
+      console.log("QR code received, uploading to Imgur...");
+      qrcode.toDataURL(qr, async (err, url) => {
+        if (err) {
+          console.error("Error generating QR code", err);
+          return;
+        }
+        try {
+          const client = new ImgurClient({
+            clientId: "546c25a59c58ad7", // Anonymous client ID
+          });
+          const response = await client.upload({
+            image: url.split(",")[1], // base64 data
+            type: "base64",
+          });
+          console.log(`Scan this QR code to log in: ${response.data.link}`);
+        } catch (uploadErr) {
+          console.error("Error uploading to Imgur:", uploadErr.message);
+          // Fallback for developers
+          console.log(
+            "Could not upload QR code. Please scan from this data URL in a browser:",
+          );
+          console.log(url);
+        }
+      });
     }
 
     if (connection === "close") {
