@@ -271,7 +271,7 @@ async function connectToWhatsApp() {
     // === COMMAND: PLS SEND / SAVE / STEAL ===
     const isReply = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
     if (
-      (text.includes("pls send") || text === "save" || text === "steal") &&
+      (text.includes("pls send") || text === "save" || text === "send") &&
       isReply
     ) {
       const quotedId = msg.message.extendedTextMessage.contextInfo.stanzaId;
