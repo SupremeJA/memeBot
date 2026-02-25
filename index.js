@@ -1,4 +1,11 @@
 require("dotenv").config();
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+
+const path = require("path");
+const os = require("os");
+
+const execFileAsync = promisify(execFile);
 
 const {
   default: makeWASocket,
@@ -49,40 +56,39 @@ app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
 // === HELPER: DOWNLOAD MEDIA (Returns Buffer) ===
 async function downloadImageBuffer(url) {
+  const tmpFile = path.join(os.tmpdir(), `img_${Date.now()}.jpg`);
+
+  // Debug: confirm url is received
+  console.log(`[URL received] ${url?.slice(0, 80)}...`);
+
   try {
-    const response = await axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept:
-          "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-        Referer: "https://www.instagram.com/",
-        "Sec-Fetch-Dest": "image",
-        "Sec-Fetch-Mode": "no-cors",
-        "Sec-Fetch-Site": "cross-site",
-      },
-    });
+    const args = [
+      "-L",
+      "-o",
+      tmpFile,
+      "-H",
+      "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "-H",
+      "Referer: https://www.instagram.com/",
+      "--silent",
+      "--fail",
+      url,
+    ];
 
-    if (response.status !== 200) {
-      throw new Error(`Status Code ${response.status}`);
-    }
+    console.log(`[Last arg] ${args[args.length - 1]?.slice(0, 80)}`);
 
-    return Buffer.from(response.data);
+    await execFileAsync("curl", args, { timeout: 30000 });
+
+    const buffer = fs.readFileSync(tmpFile);
+    console.log(`[Success] ${buffer.byteLength} bytes`);
+    return buffer;
   } catch (error) {
-    console.error(`[Download Failed] URL: ${url}`);
-    if (error.response) {
-      console.error(
-        `[Reason] Server responded with status ${error.response.status}`,
-      );
-    } else {
-      console.error(`[Reason] ${error.message}`);
-    }
+    console.error(`[Failed] ${error.message}`);
     return null;
+  } finally {
+    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
   }
 }
-
 // === HELPER: THE SUPPLIER ===
 async function fetchMemesFromApify(manualDebug = false) {
   const handle =
@@ -144,14 +150,11 @@ async function connectToWhatsApp() {
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    logger: pino({ level: "silent" }), // Hide excessive logs
-    browser: ["MemeBot", "Chrome", "1.0.0"],
+    logger: pino({ level: "silent" }),
+    version: [2, 3000, 1033893291],
+    browser: ["Chrome", "Windows", "110.0.5481.177"],
     connectTimeoutMs: 60_000,
-    defaultQueryTimeoutMs: 60_000,
-    keepAliveIntervalMs: 10_000,
-    syncFullHistory: false,
-    markOnlineOnConnect: false,
-    retryRequestDelayMs: 5000,
+    patchMessageBeforeSending: (msg) => msg,
   });
 
   sock.ev.on("creds.update", saveCreds);
